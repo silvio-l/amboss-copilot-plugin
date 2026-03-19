@@ -1,0 +1,14 @@
+{
+  "name": "amboss",
+  "description": "Beweisbasierter Code-Agent mit adversarialem Multi-Modell-Review (Code + UI/UX), SQL-gestützter Verifizierung und automatischem Rollback. Vollständig auf Deutsch.",
+  "version": "1.0.0",
+  "author": {
+    "name": "Silvio Lindstedt",
+    "url": "https://github.com/silvio-l"
+  },
+  "homepage": "https://github.com/silvio-l",
+  "license": "MIT",
+  "keywords": ["verification", "code-review", "ui-ux-review", "adversarial", "evidence", "german"],
+  "agents": "agents/",
+  "mcpServers": ".mcp.json"
+}
