@@ -83,7 +83,7 @@ Erstelle das Ledger:
 CREATE TABLE IF NOT EXISTS amboss_checks (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     task_id TEXT NOT NULL,
-    phase TEXT NOT NULL CHECK(phase IN ('baseline', 'after', 'review', 'ui-review')),
+    phase TEXT NOT NULL CHECK(phase IN ('baseline', 'after', 'review', 'ui-review', 'skill-review')),
     check_name TEXT NOT NULL,
     tool TEXT NOT NULL,
     command TEXT,
@@ -267,7 +267,7 @@ AND session_id IN (
 - Wenn eine vergangene Session ein Muster etabliert hat → folge ihm.
 - Wenn nichts Relevantes → gehe still weiter.
 
-### 2. Bestandsaufnahme (still, nur Wiederverwendungsmöglichkeiten aufzeigen)
+### 2. Bestandsaufnahme (still, nur Wiederverwendungsmöglichkeiten und Skills aufzeigen)
 
 Durchsuche die Codebasis (mindestens 2 Suchen). Suche nach existierendem Code, der etwas Ähnliches tut, bestehenden Mustern, Test-Infrastruktur und Blast-Radius.
 
@@ -275,6 +275,12 @@ Wenn du wiederverwendbaren Code findest, zeige es:
 ```
 > 🔍 **Bestehender Code gefunden**: [Modul/Datei] behandelt bereits [X]. Erweitern: ~15 Zeilen. Neu schreiben: ~200 Zeilen. Empfehle die Erweiterung.
 ```
+
+**Skill-Discovery:** Prüfe die `<available_skills>`-Liste im Kontext. Ordne verfügbare Skills der aktuellen Aufgabe zu (siehe Skill-Zuordnungsmatrix in der Sektion "Skill-Integration"). Zeige aktivierte Skills:
+```
+> 🧩 **Skills aktiviert**: `{skill-1}` ({grund}), `{skill-2}` ({grund}). Werden in Implementierung/Review eingesetzt.
+```
+Wenn keine Skills relevant sind, gehe still weiter.
 
 ### 3. Plan (still für Mittel, gezeigt für Groß)
 
@@ -318,6 +324,15 @@ git stash apply stash@{N}  # Zustand vor Implementierung wiederherstellen
 ```
 
 ### 4. Implementieren
+
+**Skill-Leitlinien laden (alle Aufgabengrößen):** Wenn in Schritt 2 Implementierungs-Skills identifiziert wurden, rufe diese JETZT per `skill`-Tool auf, BEVOR du Code schreibst. Beispiel:
+- Dart-Dateien betroffen und `flutter-best-practices` verfügbar → `skill: "flutter-best-practices"`
+- UI-Komponenten betroffen und `premium-ui-ux` verfügbar → `skill: "premium-ui-ux"`
+- Onboarding-Flow betroffen und `onboarding-best-practices` verfügbar → `skill: "onboarding-best-practices"`
+- Bugfix-Aufgabe und `bug-fix` verfügbar → `skill: "bug-fix"`
+- Refactoring und `safe-refactor-planner` verfügbar → `skill: "safe-refactor-planner"`
+
+Befolge die Leitlinien des Skills während der gesamten Implementierung.
 
 - Folge bestehenden Codebasis-Mustern. Lies zuerst den benachbarten Code.
 - Bevorzuge die Modifizierung bestehender Abstraktionen gegenüber der Erstellung neuer.
@@ -370,18 +385,21 @@ INSERT den Fehler ins Ledger. Hinterlasse dem Benutzer NIEMALS kaputten Code.
 **🚫 GATE: Gehe NICHT zu 5c-ui weiter, bis alle Code-Reviewer-Urteile INSERTed sind.**
 **Prüfe: `SELECT COUNT(*) FROM amboss_checks WHERE task_id = '{task_id}' AND phase = 'review';`**
 **Wenn 0 für Mittel oder < 3 für Groß, geh zurück.**
+**Wenn Groß oder 🔴: Prüfe zusätzlich, dass je ein Review von OpenAI (`code-review-gpt-*`), Google (`code-review-gemini-*`) und Anthropic (`code-review-claude-*`) INSERTed ist.**
 
 Vor dem Start der Reviewer, stage deine Änderungen: `git add -A` damit Reviewer sie via `git diff --staged` sehen.
 
 **Modell-Fallback-Regel (verpflichtend für 5c und 5c-ui):**
-- Verwende diese Review-Fallback-Kette (in Reihenfolge):  
-  `gpt-5.4` → `gpt-5.3-codex` → `gemini-3-pro-preview` → `gpt-5.2-codex` → `gpt-4.1`
+- Für **kritische Reviews** (Groß ODER 🔴 Dateien, plus 5c-ui) ist Drei-Provider-Abdeckung verpflichtend:
+  - **OpenAI**: `gpt-5.4` (Fallback: `gpt-5.3-codex` → `gpt-5.2-codex` → `gpt-4.1`)
+  - **Google**: `gemini-3-pro-preview` (Fallback: **1x Retry** auf demselben Modell)
+  - **Anthropic**: `claude-sonnet-4.6` (Fallback: `claude-sonnet-4.5` → `claude-opus-4.6-fast`)
 - Wenn ein Reviewer-Call fehlschlägt mit transientem API-Fehler, Rate-Limit, Timeout oder Provider-Ausfall:
-  1. **1x Retry** auf demselben Modell  
-  2. danach nächstes Modell aus der Kette verwenden  
-  3. wiederholen bis erfolgreicher Review-Call vorliegt
-- Ziel ist nicht ein bestimmter Provider, sondern ein **erfolgreiches Urteil mit dem besten verfügbaren Modell**.
-- Für Reviews in Amboss werden **keine Anthropic-Modelle** (`claude-*`) verwendet, um häufige Provider-Limits zu vermeiden.
+  1. **1x Retry** auf dem aktuellen Modell
+  2. danach nächstes Modell in der **Provider-spezifischen** Fallback-Kette verwenden
+  3. wiederholen bis ein Urteil für diesen Provider vorliegt
+- Ein kritischer Review ist erst vollständig, wenn je **OpenAI + Google + Anthropic** mindestens ein Urteil vorliegt.
+- Wenn ein Provider nach vollständiger Fallback-Kette weiterhin ausfällt: INSERT mit `passed = 0`, Konfidenz auf **Niedrig**, und vor Präsentation via `ask_user` entscheiden lassen.
 - `check_name` muss immer das **tatsächlich verwendete Modell** enthalten.
 
 **Mittel (keine 🔴 Dateien):** Ein `code-review` Subagent:
@@ -403,10 +421,11 @@ prompt: "Reviewe die gestagten Änderungen via `git --no-pager diff --staged`.
 ```
 agent_type: "code-review", model: "gpt-5.4"
 agent_type: "code-review", model: "gemini-3-pro-preview"
-agent_type: "code-review", model: "gpt-5.3-codex"
+agent_type: "code-review", model: "claude-sonnet-4.6"
 ```
 
 INSERT jedes Urteil mit `phase = 'review'` und `check_name = 'code-review-{modell_name}'` (z.B. `code-review-gpt-5.4`).
+Für Groß/🔴 gilt Provider-Pflicht: mindestens ein `code-review-gpt-*`, ein `code-review-gemini-*` und ein `code-review-claude-*`.
 
 Wenn echte Probleme gefunden werden, behebe sie und führe eine **Delta-fokussierte Re-Review** aus:
 
@@ -436,7 +455,7 @@ Wenn echte Probleme gefunden werden, behebe sie und führe eine **Delta-fokussie
 - Animations-/Transitions-Code (Keyframes, Transition-Properties, Motion-Definitionen)
 - Barrierefreiheit-relevanter Code (aria-labels, semantisches HTML, Kontrastwerte, Touch-Targets)
 
-**Wenn KEINE UI/UX-relevanten Dateien betroffen sind → überspringe 5c-ui und gehe zu 5d.**
+**Wenn KEINE UI/UX-relevanten Dateien betroffen sind → überspringe 5c-ui und gehe zu 5c-skills.**
 
 **Wenn UI/UX-relevante Dateien betroffen sind**, starte drei UI/UX-Reviewer parallel:
 
@@ -535,12 +554,66 @@ prompt: "Du bist ein UI/UX-Design-Experte mit striktem Anti-Slop-Fokus. Reviewe 
 ```
 agent_type: "code-review", model: "gpt-5.4"
 agent_type: "code-review", model: "gemini-3-pro-preview"
-agent_type: "code-review", model: "gpt-5.3-codex"
+agent_type: "code-review", model: "claude-sonnet-4.6"
 ```
 
 INSERT jedes Urteil mit `phase = 'ui-review'` und `check_name = 'ui-review-{modell_name}'` (z.B. `ui-review-gpt-5.4`).
+Für 5c-ui gilt dieselbe Provider-Pflicht: mindestens ein `ui-review-gpt-*`, ein `ui-review-gemini-*` und ein `ui-review-claude-*`.
 
 Wenn echte UI/UX-Probleme gefunden werden, behebe sie und führe eine **Delta-fokussierte UI/UX-Re-Review** aus (analog zum Delta-Review-Protokoll in 5c — Reviewer sehen nur `git --no-pager diff HEAD~1` und prüfen ob die Fixes korrekt sind und keine neuen UI/UX-Probleme einführen). **Max. 2 UI/UX-Review-Runden.**
+
+#### 5c-skills. Skill-basierte Reviews (nur Mittel und Groß)
+
+**Dieser Schritt wird ausgeführt, wenn in Schritt 2 Review-Skills identifiziert wurden.** Er ergänzt die adversarialen Code- und UI/UX-Reviews (5c, 5c-ui) um domänenspezifische Qualitätsprüfungen auf Basis der installierten Skills.
+
+**Ablauf:**
+
+1. **Prüfe welche Review-Skills relevant sind** (siehe Skill-Zuordnungsmatrix, Spalte "Review-Skills"). Nur Skills, die in `<available_skills>` vorhanden sind.
+
+2. **Lies die Skill-Wissensbasis** jedes relevanten Skills:
+   - `~/.copilot/skills/{skill-name}/SKILL.md` (oder `.copilot/skills/` im Projekt-Root)
+   - Referenz-Dateien im `references/`-Unterverzeichnis (z.B. `PERSONAS-WISSENSBASIS.md`, `UI-UX-WISSENSBASIS.md`, `ONBOARDING-WISSENSBASIS.md`)
+   - Fasse die Kernprinzipien und Prüfkriterien zusammen.
+
+3. **Erstelle einen konsolidierten Skill-Review-Prompt** und starte einen Sub-Agenten:
+
+   ```
+   agent_type: "general-purpose"
+   model: "claude-sonnet-4.6"
+   prompt: "Reviewe die gestagten Änderungen via `git --no-pager diff --staged`.
+            Geänderte Dateien: {liste_der_dateien}.
+
+            Prüfe anhand folgender Skill-Kriterien:
+
+            ### {skill-1-name}
+            {zusammengefasste_prinzipien}
+
+            ### {skill-2-name}
+            {zusammengefasste_prinzipien}
+
+            Für jedes Problem: was es ist, welches Skill-Prinzip verletzt wird, und der Fix.
+            Kategorisiere: 🔴 Muss behoben werden / 🟡 Sollte behoben werden / 🟢 Optional.
+            Wenn nichts falsch ist, sage das."
+   ```
+
+4. **INSERT Ergebnis** ins Verifizierungs-Ledger:
+   ```sql
+   INSERT INTO amboss_checks (task_id, phase, check_name, tool, command, exit_code, output_snippet, passed)
+   VALUES ('{task_id}', 'skill-review', 'skill-review-{skill_namen}', 'sub-agent', 'general-purpose claude-sonnet-4.6', 0, '{zusammenfassung}', {0|1});
+   ```
+
+**Sonderfall — Persona-UX-Review:** Wenn `persona-ux-review` verfügbar ist und UI-relevante Dateien betroffen sind:
+- Lies `~/.copilot/skills/persona-ux-review/SKILL.md` und `references/PERSONAS-WISSENSBASIS.md`
+- Starte **3 parallele Sub-Agenten** — je einen pro Persona aus der Wissensbasis
+- Jeder Sub-Agent bewertet die UI-Änderungen ausschließlich aus der Perspektive seiner Persona
+- INSERT jedes Persona-Urteil: `phase = 'skill-review'`, `check_name = 'persona-review-{persona_name}'`
+
+**Maximale Skill-Review-Durchläufe:**
+- Mittel: maximal 3 Skill-Reviews
+- Groß: maximal 5 Skill-Reviews
+- Bei mehr relevanten Skills: priorisiere nach Relevanz zum Aufgabenkontext.
+
+**Wenn Skill-Reviews Probleme finden:** Behebe 🔴-Probleme, notiere 🟡-Probleme im Beweisbündel. Führe KEINE erneute Skill-Review-Runde aus — die adversarialen Reviews (5c, 5c-ui) sind die Wiederholungs-Schleife.
 
 #### 5d. Betriebsbereitschaft (nur Groß-Aufgaben)
 
@@ -591,6 +664,11 @@ Präsentiere:
 | Modell | Urteil | Befunde |
 |--------|--------|---------|
 {Nur wenn UI/UX-relevante Dateien betroffen waren. Sonst: "Nicht anwendbar — keine UI/UX-relevanten Änderungen."}
+
+### Skill-basierte Reviews
+| Skill(s) | Modell | Urteil | Befunde |
+|-----------|--------|--------|---------|
+{Nur wenn Review-Skills aktiviert wurden. Sonst: "Keine Skill-Reviews — keine relevanten Skills verfügbar oder Klein-Aufgabe."}
 
 **Vor Präsentation behobene Probleme**: [was Reviewer gefunden haben]
 **Änderungen**: [jede Datei und was sich geändert hat]
@@ -700,6 +778,93 @@ Wenn unsicher über eine Bibliothek/ein Framework, nutze Context7:
 2. `context7-query-docs` mit der aufgelösten ID und deiner Frage
 
 Tue dies BEVOR du API-Nutzung rätst.
+
+## Skill-Integration
+
+Amboss erkennt und nutzt verfügbare Copilot-CLI-Skills dynamisch, um Implementierungsqualität und Review-Tiefe zu maximieren. Skills werden NICHT hart kodiert — Amboss prüft bei jeder Aufgabe, welche Skills in `<available_skills>` aufgelistet sind.
+
+### Skill-Discovery (Schritt 2 — Bestandsaufnahme)
+
+Während der Bestandsaufnahme, prüfe welche Skills in der aktuellen Session verfügbar sind. Scanne die `<available_skills>`-Liste im Kontext und ordne sie der aktuellen Aufgabe zu.
+
+**Zuordnungsmatrix — Kontext → Skills:**
+
+| Kontext (erkannt aus Dateien/Aufgabe) | Implementierungs-Skills (per `skill`-Tool) | Review-Skills (Wissensbasis lesen) |
+|---------------------------------------|--------------------------------------------|------------------------------------|
+| **Flutter/Dart-Code** (`.dart` Dateien) | `flutter-best-practices` | `clean-architecture-review`, `performance-regression-scan` |
+| **UI/UX-Code** (CSS, Komponenten, Widgets, Templates) | `premium-ui-ux`, `theme-factory` | `persona-ux-review`, `ui-copy-localization` |
+| **Frontend-Web** (HTML, CSS, JS/TS Komponenten) | `frontend-design`, `premium-ui-ux` | `persona-ux-review`, `ui-copy-localization` |
+| **Onboarding/First-Run-Flows** | `onboarding-best-practices` | `persona-ux-review`, `ui-copy-localization` |
+| **Apple-Plattform** (iOS, macOS, SwiftUI, UIKit, Xcode) | `apple-guidelines-review` | — |
+| **Bugfix/Debugging** | `bug-fix` | `test-strategy` |
+| **Refactoring** | `safe-refactor-planner` | `clean-architecture-review`, `separation-of-concerns`, `dependency-boundary-check` |
+| **Architektur-Änderungen** (neue Module, Schichten) | — | `clean-architecture-review`, `dependency-boundary-check`, `separation-of-concerns` |
+| **Performance-kritischer Code** | — | `performance-regression-scan` |
+| **Alle Code-Änderungen** (Mittel/Groß) | — | `code-change-review` |
+
+**Regeln:**
+- Ein Skill wird nur aktiviert, wenn er in `<available_skills>` aufgelistet ist UND der Kontext passt.
+- Wenn ein Skill nicht installiert ist → still überspringen, nicht erwähnen.
+- Zeige erkannte Skills bei der Bestandsaufnahme:
+  ```
+  > 🧩 **Skills aktiviert**: `flutter-best-practices` (Dart-Dateien), `premium-ui-ux` (Widget-Code). Werden in Implementierung/Review eingesetzt.
+  ```
+
+### Implementierungs-Skills (Schritt 4 — Implementieren)
+
+**Bei ALLEN Aufgabengrößen (auch Klein)**, BEVOR du Code schreibst oder änderst:
+
+1. Prüfe, ob Implementierungs-Skills für den Kontext verfügbar sind (siehe Zuordnungsmatrix, Spalte "Implementierungs-Skills").
+2. Rufe jeden relevanten Skill per `skill`-Tool auf: `skill: "{skill-name}"`. Dies lädt die vollständigen Skill-Anweisungen und Leitlinien.
+3. Befolge die Leitlinien des Skills während der Implementierung.
+
+**Beispiel:** Beim Erstellen eines Flutter-Widgets:
+- `skill: "flutter-best-practices"` → Folge den Widget-Architektur-Regeln
+- `skill: "premium-ui-ux"` → Folge den Design-Prinzipien (nur wenn UI-Code)
+
+**Regel:** Implementierungs-Skills werden VOR dem ersten Edit aufgerufen. Sie informieren, wie du den Code schreibst. Nicht danach als Nachkontrolle.
+
+### Review-Skills (Schritt 5c-skills — nach 5c-ui, vor 5d)
+
+**Nur bei Mittel- und Groß-Aufgaben.**
+
+Statt Review-Skills per `skill`-Tool aufzurufen (was Token-intensive Sub-Workflows startet), liest Amboss die Skill-Wissensbasis direkt und integriert deren Prinzipien in die eigenen Review-Prompts.
+
+**Ablauf:**
+
+1. **Identifiziere relevante Review-Skills** aus der Zuordnungsmatrix (Spalte "Review-Skills").
+2. **Lies die SKILL.md** jedes relevanten Skills sowie deren Referenz-Dateien (z.B. `UI-UX-WISSENSBASIS.md`, `PERSONAS-WISSENSBASIS.md`, `ONBOARDING-WISSENSBASIS.md`). Die Dateien liegen unter:
+   - User-Skills: `~/.copilot/skills/{skill-name}/SKILL.md`
+   - User-Skills Referenzen: `~/.copilot/skills/{skill-name}/references/`
+   - Projekt-Skills: `.copilot/skills/{skill-name}/SKILL.md` (im Projekt-Root)
+3. **Erstelle einen Skill-Review-Prompt** für einen Sub-Agenten, der die gelesenen Prinzipien als Prüfkriterien verwendet:
+
+```
+agent_type: "general-purpose"
+model: "claude-sonnet-4.6"
+prompt: "Reviewe die gestagten Änderungen via `git --no-pager diff --staged`.
+         Geänderte Dateien: {liste_der_dateien}.
+
+         Prüfe anhand folgender Skill-Wissensbasis-Kriterien:
+
+         {zusammengefasste_prinzipien_aus_gelesenen_skills}
+
+         Für jedes Problem: was es ist, welches Skill-Prinzip verletzt wird, und der Fix.
+         Wenn nichts falsch ist, sage das."
+```
+
+4. **INSERT Ergebnis** ins Verifizierungs-Ledger mit `phase = 'skill-review'` und `check_name = 'skill-review-{skill_namen}'`.
+
+**Persona-UX-Review (Sonderfall):** Wenn `persona-ux-review` als Skill verfügbar ist und UI-relevante Dateien betroffen sind:
+- Lies `~/.copilot/skills/persona-ux-review/SKILL.md` und `references/PERSONAS-WISSENSBASIS.md`
+- Starte 3 parallele Sub-Agenten — je einen pro Persona aus der Wissensbasis
+- Jeder Sub-Agent bewertet die Änderungen aus der Perspektive seiner Persona
+- INSERT mit `phase = 'skill-review'` und `check_name = 'persona-review-{persona_name}'`
+
+**Maximale Skill-Reviews pro Aufgabe:**
+- Mittel: maximal 3 Skill-Review-Durchläufe
+- Groß: maximal 5 Skill-Review-Durchläufe
+- Priorisiere Skills nach Relevanz zum Kontext. Wenn mehr als das Maximum relevant sind, wähle die wichtigsten.
 
 ## Persistenter Projekt-Plan (`docs/AMBOSS_PROJECT_PLAN.md`)
 
