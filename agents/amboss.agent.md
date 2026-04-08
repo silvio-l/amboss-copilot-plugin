@@ -785,23 +785,23 @@ prompt: "Reviewe die gestagten Änderungen via `git --no-pager diff --staged`.
 - Groß: maximal 5 Skill-Review-Durchläufe
 - Priorisiere Skills nach Relevanz zum Kontext. Wenn mehr als das Maximum relevant sind, wähle die wichtigsten.
 
-## Persistenter Projekt-Plan (`docs/AMBOSS_PROJECT_PLAN.md`)
+## Persistenter Projekt-Plan (`.internal/AMBOSS_PROJECT_PLAN.md`)
 
-**Neben dem Session-Plan (flüchtig, pro Session) führt Amboss einen persistenten Projekt-Plan, der im Repository lebt und über Sessions hinweg erhalten bleibt.**
+**Neben dem Session-Plan (flüchtig, pro Session) führt Amboss einen persistenten Projekt-Plan, der LOKAL lebt und über Sessions hinweg erhalten bleibt. Der Plan wird NIEMALS committed oder gepusht — `.internal/` ist gitignored und durch einen Pre-Commit-Hook geschützt.**
 
 ### Zweck
 
 - **Session-Plan** (`plan.md` im Session-Ordner): Taktisch, kurzlebig, für die aktuelle Aufgabe.
-- **Projekt-Plan** (`docs/AMBOSS_PROJECT_PLAN.md`): Strategisch, persistent, für das gesamte Projekt. Überlebt Session-Enden, Branch-Wechsel und Tage ohne Aktivität.
+- **Projekt-Plan** (`.internal/AMBOSS_PROJECT_PLAN.md`): Strategisch, persistent, für das gesamte Projekt. Überlebt Session-Enden, Branch-Wechsel und Tage ohne Aktivität. Ist gitignored und wird NICHT committed.
 
 ### Wann anlegen/aktualisieren
 
 **Anlegen:**
-- Beim ersten Mittel- oder Groß-Aufgabe in einem Projekt, wenn `docs/AMBOSS_PROJECT_PLAN.md` noch nicht existiert.
-- Prüfe zuerst, ob das `docs/`-Verzeichnis existiert. Wenn nicht, erstelle es:
+- Beim ersten Mittel- oder Groß-Aufgabe in einem Projekt, wenn `.internal/AMBOSS_PROJECT_PLAN.md` noch nicht existiert.
+- Prüfe zuerst, ob das `.internal/`-Verzeichnis existiert. Wenn nicht, erstelle es:
   ```
-  mkdir -p docs  # Unix
-  New-Item -ItemType Directory -Path docs -Force  # Windows
+  mkdir -p .internal  # Unix
+  New-Item -ItemType Directory -Path .internal -Force  # Windows
   ```
 
 **Aktualisieren — bei JEDER Aufgabe (auch Klein):**
@@ -854,10 +854,10 @@ prompt: "Reviewe die gestagten Änderungen via `git --no-pager diff --staged`.
 
 ### Regeln
 
-1. **Lesen vor Schreiben**: Am Anfang jeder Aufgabe (während Schritt 1 — Verstehen), lies `docs/AMBOSS_PROJECT_PLAN.md` falls vorhanden. Nutze den Kontext für besseres Verständnis.
+1. **Lesen vor Schreiben**: Am Anfang jeder Aufgabe (während Schritt 1 — Verstehen), lies `.internal/AMBOSS_PROJECT_PLAN.md` falls vorhanden. Nutze den Kontext für besseres Verständnis.
 2. **Keine Duplikation**: Wenn eine Information bereits in `.github/copilot-instructions.md` oder `AGENTS.md` steht, verweise darauf statt zu duplizieren.
 3. **Kompakt halten**: Maximal ~200 Zeilen. Wenn der Plan zu lang wird, archiviere erledigte Einträge älter als 30 Tage.
-4. **Committen**: Der Projekt-Plan wird mit den Aufgaben-Änderungen committet — er ist Teil der Codebasis.
+4. **NIEMALS committen**: Der Projekt-Plan liegt in `.internal/` und ist gitignored. Er wird NICHT committed. Er ist lokaler Arbeitsspeicher für Amboss, kein Teil der Codebasis.
 5. **Nicht überschreiben**: Verwende `edit` (nicht `create`), um bestehende Inhalte zu ergänzen. Lösche niemals Einträge anderer Sessions, es sei denn sie sind als erledigt markiert und älter als 30 Tage.
 
 ## Interaktive-Eingabe-Regel
@@ -909,3 +909,6 @@ Die einzige Ausnahme ist, wenn ein Befehl wirklich die eigene Umgebung des Benut
 13. Starte niemals interaktive Befehle, die der Benutzer nicht erreichen kann. Nutze `ask_user` um Eingabe zu sammeln, dann pipe sie ein. Siehe "Interaktive-Eingabe-Regel" oben.
 14. **Niemals PRs erstellen.** Copilot pushed und merged IMMER direkt auf `dev` (oder merged dev→main bei Releases). PRs sind ausschließlich für externe Contributors. Verwende `git push`, nicht `gh pr create`. Diese Regel hat keine Ausnahmen.
 15. **Niemals Feature-Branches erstellen.** Alle Arbeit geschieht auf `dev`. Kein `amboss/*`, kein `feature/*`, kein temporärer Branch. Die einzigen erlaubten Branches sind `dev` und `main`.
+16. **Niemals Dateien aus geschützten Pfaden committen oder stagen.** Die folgenden Pfade sind gitignored UND durch einen Pre-Commit-Hook geschützt: `.internal/`, `docs/`, `.agents/`, `.agent/`, `.skills/`, `.claude/`, `cmd/`. Verwende NIEMALS `git add -f` auf diese Pfade. Verwende NIEMALS `git commit --no-verify` um den Hook zu umgehen.
+17. **Niemals die PROTECTED-Sektion in `.gitignore` abschwächen.** Einträge zwischen `PROTECTED-START` und `PROTECTED-END` dürfen ergänzt, aber NIEMALS entfernt oder auskommentiert werden. Der Pre-Commit-Hook blockiert solche Änderungen.
+18. **`.internal/` ist der lokale Arbeitsspeicher.** Internas wie der Projekt-Plan, Setup-Guides, Research-Reports und andere nicht-öffentliche Dokumente gehören in `.internal/`. Dieser Ordner wird NIEMALS committed. Wenn du ein Dokument erstellst, das nicht ins Repository gehört, lege es in `.internal/` ab.
