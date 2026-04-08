@@ -111,89 +111,50 @@ Zeige den verstärkten Prompt nur, wenn er die Absicht wesentlich geändert hat:
 
 ### 0b. Git-Hygiene (still — nach Verstärkung)
 
-Prüfe den Git-Zustand **bei jeder neuen Aufgabe**. Bringe Probleme früh ans Licht, damit der Benutzer sie nicht erst nach getaner Arbeit entdeckt.
+Prüfe den Git-Zustand **bei jeder neuen Aufgabe**.
 
 **Dieser Schritt wird IMMER ausgeführt — auch bei Klein-Aufgaben, auch im Autopilot-Modus. Git-Hygiene ist nicht optional.**
 
-#### 0b-0. Branch-Alignment-Prüfung (ZUERST — vor allem anderen)
+**Branching-Strategie: Zwei-Branch-Modell (Solo-Entwickler)**
+- `dev` = aktiver Entwicklungs-Branch. ALLE Arbeit geschieht hier. Direkt committen und pushen.
+- `main` = stabiler Release-Branch. Nur Merges von `dev` bei Releases. Niemals direkt committen.
+- Feature-Branches werden NICHT erstellt. Niemals. Auch nicht temporär.
+- PRs werden NICHT erstellt. Copilot pushed und merged IMMER direkt. PRs existieren ausschließlich für externe Contributors.
 
-**Zweck:** Verhindere, dass Änderungen einer neuen Aufgabe versehentlich auf dem Feature-Branch einer alten Aufgabe landen.
+#### 0b-0. Dev-Branch-Enforcement (ZUERST — vor allem anderen)
+
+**Zweck:** Sicherstellen, dass ALLE Arbeit auf `dev` stattfindet. Niemals Feature-Branches erstellen.
 
 1. Ermittle den aktuellen Branch:
    ```
    git rev-parse --abbrev-ref HEAD
    ```
 
-2. Ermittle den Integrations-Branch (Ziel für Merges):
+2. **Wenn auf `dev`**: ✅ Still weiter.
+
+3. **Wenn auf `main`**:
+   Prüfe ob `dev` existiert:
    ```
-   git branch --list main master dev develop
+   git branch --list dev
    ```
-   Priorität: `dev` > `develop` > `main` > `master`. Speichere als `{integrations_branch}`.
+   - Wenn `dev` existiert: `git checkout dev`
+   - Wenn `dev` nicht existiert: `git checkout -b dev`
+   > ⚠️ **Amboss Hinweis**: War auf `main` (Release-Branch). Auf `dev` gewechselt — alle Entwicklung gehört hierher.
 
-3. **Wenn auf einem Feature-Branch** (nicht `main`/`master`/`dev`/`develop`):
-
-   a. Prüfe, ob der Branch zur aktuellen Aufgabe gehört. Vergleiche den Branch-Namen mit dem `{task_id}` der neuen Aufgabe. Prüfe die letzten Commits:
-      ```
-      git --no-pager log --oneline {integrations_branch}..HEAD --max-count=10
-      ```
-
-   b. **Wenn der Branch NICHT zur neuen Aufgabe gehört** (anderer Name, Commits für eine andere Aufgabe):
-      > ⚠️ **Amboss Widerspruch**: Du bist auf Branch `{aktueller_branch}`, aber die neue Aufgabe `{task_id}` gehört nicht hierher. Commits hier würden in den falschen Feature-Branch fließen.
-
-      Prüfe, ob der Branch noch uncommitted oder nicht-gemergte Arbeit hat:
-      ```
-      git status --porcelain
-      git --no-pager log --oneline {integrations_branch}..HEAD --max-count=5
-      ```
-
-      Dann `ask_user` mit kontextabhängigen Optionen:
-      - **Wenn uncommitted Änderungen + ungemergte Commits**: "Committen, nach `{integrations_branch}` mergen und aufräumen" / "Nur committen und Branch wechseln" / "Stashen und Branch wechseln"
-      - **Wenn nur ungemergte Commits (clean working tree)**: "Nach `{integrations_branch}` mergen und aufräumen" / "Branch wechseln ohne Merge" / "Hier bleiben"
-      - **Wenn nur uncommitted Änderungen (keine Commits auf Branch)**: "Stashen und Branch wechseln" / "Hier bleiben"
-
-      **Merge-Back-Ablauf** (wenn gewählt):
-      ```
-      git add -A && git commit -m "WIP: {aktueller_branch} finalisiert vor Aufgabenwechsel"  # nur wenn dirty
-      git checkout {integrations_branch}
-      git merge {aktueller_branch} --no-ff -m "Merge {aktueller_branch}: Aufgabe abgeschlossen"
-      git branch -d {aktueller_branch}  # nur bei erfolgreichem Merge
-      ```
-      Bei Merge-Konflikten:
-      ```
-      git merge --abort
-      ```
-      > ⚠️ **Amboss Hinweis**: Merge-Konflikte beim Zurückmergen von `{aktueller_branch}`. Branch bleibt erhalten. Wechsle zu `{integrations_branch}` ohne Merge.
-      ```
-      git checkout {integrations_branch}
-      ```
-
-   c. **Wenn der Branch zur aktuellen Aufgabe gehört**: Weiter auf diesem Branch arbeiten. Still fortfahren.
-
-4. **Wenn auf `main`/`master`/`dev`/`develop`**: Prüfe ob ein verwaister Amboss-Branch existiert:
-   ```
-   git branch --list "amboss/*"
-   ```
-   Wenn Amboss-Branches existieren, die nicht gemergt sind:
-   > ⚠️ **Amboss Hinweis**: Es gibt ungemergte Amboss-Branches: `{branch_liste}`. Sollen diese vor der neuen Aufgabe aufgeräumt werden?
-   Dann `ask_user`: "Alle mergen und löschen" / "Später aufräumen" / "Branches auflisten lassen".
+4. **Wenn auf einem anderen Branch** (verwaist, alt, fremd):
+   > ⚠️ **Amboss Hinweis**: Du bist auf `{branch}`. Nur `dev` und `main` sind erlaubt. Empfehle Wechsel auf `dev`.
+   Dann `ask_user`: "Nach dev wechseln (Empfohlen)" / "Hier bleiben (Ausnahme)".
+   Bei Wechsel: `git checkout dev`
 
 #### 0b-1. Dirty-State-Prüfung
 
 Führe `git status --porcelain` aus. Wenn es uncommitted Änderungen gibt, die der Benutzer nicht gerade angefragt hat:
 > ⚠️ **Amboss Widerspruch**: Du hast uncommitted Änderungen von einer vorherigen Aufgabe. Diese mit neuer Arbeit zu vermischen macht Rollback unmöglich.
 Dann `ask_user`: "Jetzt committen" / "Stashen" / "Ignorieren und fortfahren".
-- Commit: `git add -A && git commit -m "WIP: uncommitted Änderungen vor Amboss-Aufgabe"` (committet auf aktuellem Branch VOR einem Branch-Wechsel)
+- Commit: `git add -A && git commit -m "WIP: uncommitted Änderungen vor Amboss-Aufgabe"`
 - Stash: `git stash push -m "pre-amboss-{task_id}"`
 
-#### 0b-2. Branch-Prüfung für neue Aufgabe
-
-Führe `git rev-parse --abbrev-ref HEAD` aus. Wenn auf `main` oder `master` bei einer Mittel-/Groß-Aufgabe, widerspreche:
-> ⚠️ **Amboss Widerspruch**: Du bist auf `main`. Das ist eine Mittel-/Groß-Aufgabe — empfehle zuerst einen Branch zu erstellen.
-Dann `ask_user` mit Optionen: "Branch für mich erstellen" / "Auf main bleiben" / "Ich kümmere mich selbst".
-Wenn "Branch für mich erstellen": `git checkout -b amboss/{task_id}`.
-**Merke dir intern, dass Amboss diesen Branch erstellt hat** → `{amboss_branch_erstellt} = true` und `{quell_branch}` = der Branch von dem gewechselt wurde (main/master/dev).
-
-#### 0b-3. Worktree-Erkennung
+#### 0b-2. Worktree-Erkennung
 
 Führe `git rev-parse --show-toplevel` aus und vergleiche mit cwd. Bei einem Worktree, notiere es still. Wenn der Worktree-Name nicht zum Branch passt, erwähne es, damit der Benutzer weiß, wo er sich befindet.
 
@@ -718,48 +679,6 @@ Nach der Präsentation, committe die Änderungen automatisch. Der Benutzer soll 
 
 Für Klein-Aufgaben: `ask_user` mit Optionen "Diese Änderung committen" / "Ich committe später". Erzwinge es nicht bei Einzeilern — der Benutzer könnte kleine Fixes sammeln.
 
-### 8b. Merge-Back & Branch-Aufräumung (nach Commit — nur wenn Amboss den Branch erstellt hat)
-
-**Dieser Schritt wird NUR ausgeführt, wenn `{amboss_branch_erstellt} = true` ist**, d.h. Amboss hat in Schritt 0b den Feature-Branch selbst erstellt. Wenn der Benutzer den Branch manuell erstellt hat oder auf main/master geblieben ist, überspringe diesen Schritt.
-
-**Zweck:** Branch-Wildwuchs verhindern. Ein Feature-Branch, der von Amboss erstellt wurde, soll nach erfolgreicher Arbeit sauber zurückgemergt und gelöscht werden, damit keine verwaisten Branches entstehen.
-
-**Ablauf:**
-
-1. **Ziel-Branch ermitteln**: Bestimme den richtigen Merge-Ziel-Branch:
-   ```
-   git branch --list dev develop
-   ```
-   - Wenn `dev` oder `develop` existiert → Ziel ist `dev`/`develop`
-   - Sonst → Ziel ist `{quell_branch}` (der Branch, von dem in 0b gewechselt wurde — typischerweise `main` oder `master`)
-
-2. **Merge ausführen**:
-   ```
-   git checkout {ziel_branch}
-   git merge amboss/{task_id} --no-ff -m "Merge amboss/{task_id}: {kurze_aufgabenbeschreibung}"
-   ```
-   Der `--no-ff` Flag erzeugt einen Merge-Commit, damit die Feature-Historie im Log sichtbar bleibt.
-
-3. **Merge-Konflikte behandeln**: Wenn der Merge fehlschlägt:
-   ```
-   git merge --abort
-   ```
-   > ⚠️ **Amboss Hinweis**: Merge-Konflikte beim Zurückmergen von `amboss/{task_id}` nach `{ziel_branch}`. Der Feature-Branch bleibt erhalten. Bitte manuell mergen:
-   > `git checkout {ziel_branch} && git merge amboss/{task_id}`
-   Dann **überspringe** die Branch-Löschung und beende.
-
-4. **Feature-Branch löschen** (nur bei erfolgreichem Merge):
-   ```
-   git branch -d amboss/{task_id}
-   ```
-
-5. **Bestätigung ausgeben**:
-   ```
-   ✅ Merge abgeschlossen: `amboss/{task_id}` → `{ziel_branch}`
-   🗑️ Feature-Branch `amboss/{task_id}` gelöscht.
-   📍 Aktueller Branch: `{ziel_branch}`
-   ```
-
 ## Build-/Test-Befehl-Erkennung
 
 Dynamisch erkennen — nicht raten:
@@ -988,3 +907,5 @@ Die einzige Ausnahme ist, wenn ein Befehl wirklich die eigene Umgebung des Benut
 11. Baseline vor der Änderung. Erfasse den Zustand vor Edits bei Mittel- und Groß-Aufgaben.
 12. Keine leere Laufzeit-Verifizierung. Wenn Stufen 1-2 kein Laufzeit-Signal liefern (nur statische Prüfungen), führe mindestens eine Stufe-3-Prüfung aus.
 13. Starte niemals interaktive Befehle, die der Benutzer nicht erreichen kann. Nutze `ask_user` um Eingabe zu sammeln, dann pipe sie ein. Siehe "Interaktive-Eingabe-Regel" oben.
+14. **Niemals PRs erstellen.** Copilot pushed und merged IMMER direkt auf `dev` (oder merged dev→main bei Releases). PRs sind ausschließlich für externe Contributors. Verwende `git push`, nicht `gh pr create`. Diese Regel hat keine Ausnahmen.
+15. **Niemals Feature-Branches erstellen.** Alle Arbeit geschieht auf `dev`. Kein `amboss/*`, kein `feature/*`, kein temporärer Branch. Die einzigen erlaubten Branches sind `dev` und `main`.
